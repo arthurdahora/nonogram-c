@@ -1,0 +1,417 @@
+﻿#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "util.h"
+
+#define MAX_CLUES 4
+
+// definicoes janela
+#define LARGURA_JANELA 800
+#define ALTURA_JANELA 800
+#define TITULO_JANELA "Nonogram"
+
+// definicoes tabuleiro
+#define LINHAS 8
+#define COLUNAS 8
+#define ALTURA_CELULA 50
+#define LARGURA_CELULA 50
+#define LARGURA_TABULEIRO LARGURA_CELULA *COLUNAS
+#define ALTURA_TABULEIRO ALTURA_CELULA *LINHAS
+#define MARGIN_HORIZONTAL (int)((LARGURA_JANELA / 2) - (LARGURA_TABULEIRO / 2))
+#define MARGIN_VERTICAL (int)((ALTURA_JANELA / 2) - (ALTURA_TABULEIRO / 2))
+
+
+typedef enum {
+     MENU,
+    JOGANDO, 
+    GANHOU, 
+    PERDEU
+ }EstadoJogo;
+typedef enum {
+    MODO_NORMAL, 
+    MODO_CLASSICO
+}ModoJogo;
+
+
+// prototipos das funcoes
+void inicia_tabuleiro(Celula tabuleiro[][COLUNAS]);
+void desenha_tabuleiro(Tela *t, Celula tabuleiro[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[]);
+void verifica_clique(Tela *t, Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS], ModoJogo modo_jogo, int *vidas, EstadoJogo *estado_jogo);
+void escreve_numeros(Tela *t, int *numeros, int qtd, Ponto inicio, bool horizontal);
+void cicla_estado_celula(Celula *c);
+void gera_solucao(bool solucao[][COLUNAS]);
+void calcula_clues_linha(bool solucao[][COLUNAS], int linha, int clues[], int *qtd);
+void calcula_clues_coluna(bool solucao[][COLUNAS], int coluna, int clues[], int *qtd);
+void calcula_todos_clues(bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[]);
+void gera_nonogram(bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[]);
+bool verifica_vitoria(Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS]);
+void desenha_menu(Tela *t, ModoJogo *modo_jogo, EstadoJogo *estado_jogo, Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[]);
+
+int main(int argc, char **argv)
+{
+    EstadoJogo estado_jogo = MENU;
+    ModoJogo modo_jogo;
+    bool solucao[LINHAS][COLUNAS];
+
+    int vidas = 3;
+
+    int clues_linhas[LINHAS][MAX_CLUES];
+    int qtd_clues_linhas[LINHAS];
+
+    int clues_colunas[COLUNAS][MAX_CLUES];
+    int qtd_clues_colunas[COLUNAS];
+
+    int tecla_pressionada;
+    Tela t;
+
+    Celula tabuleiro_nonogram[LINHAS][COLUNAS];
+
+    inicia_tabuleiro(tabuleiro_nonogram);
+
+    srand(time(NULL));
+ 
+
+
+    inicia_tela(&t, LARGURA_JANELA, ALTURA_JANELA, TITULO_JANELA);
+
+    while ((tecla_pressionada = codigo_tecla(&t)) != ALLEGRO_EVENT_DISPLAY_CLOSE)
+    {
+        limpa_tela(&t);
+
+        if (estado_jogo == MENU)
+        {
+            desenha_menu(&t, &modo_jogo, &estado_jogo, tabuleiro_nonogram, solucao, clues_linhas, qtd_clues_linhas, clues_colunas, qtd_clues_colunas);
+        }
+        else if (estado_jogo == JOGANDO)
+        {
+            desenha_tabuleiro(&t, tabuleiro_nonogram, clues_linhas, qtd_clues_linhas, clues_colunas, qtd_clues_colunas);
+            verifica_clique(&t, tabuleiro_nonogram, solucao, modo_jogo, &vidas, &estado_jogo);        }
+
+        mostra_tela();
+        espera(30);
+    }
+
+    finaliza_tela(&t);
+
+    return 0;
+}
+
+// inicia tabuleiro do jogo, definindo as posicoes de cada celula
+void inicia_tabuleiro(Celula tabuleiro[][COLUNAS])
+{
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            // coordenadas de cada celula (retangulo)
+            int x = MARGIN_HORIZONTAL + (LARGURA_CELULA * i);
+            int y = MARGIN_VERTICAL + (ALTURA_CELULA * j);
+            // inicializacao da celula com coordenadas (ponto), tamanho e o estado (por padrao = vazio)
+            Celula c = {{x, y}, {ALTURA_CELULA, LARGURA_CELULA}, VAZIO};
+            tabuleiro[i][j] = c;
+        }
+    }
+}
+
+// desenha tabuleiro (celulas) e os numeros nas linhas e colunas
+void desenha_tabuleiro(Tela *t, Celula tabuleiro[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[])
+{
+    Cor preto = {0, 0, 0};
+    Cor vermelho = {1, 0, 0};
+    define_cor(t, preto); // usado para as bordas (quando celula nao estiver colorida) e para o preenchimento (quando estiver colorida)
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            // desenha a celula. se estado da celula for colorido, ira pintar o retangulo, senão desenha apenas as bordas
+            desenha_retangulo(tabuleiro[i][j], t, tabuleiro[i][j].estado == COLORIDO);
+            // se estado da celula for alerta, desenha um x vermelho dentro das bordas do retangulo
+            if (tabuleiro[i][j].estado == ALERTA)
+            {
+                define_cor(t, vermelho);
+                desenha_x_dentro_ret(tabuleiro[i][j], t);
+                define_cor(t, preto); // restaura cor
+            }
+        }
+    }
+
+    // escrita dos numeros horizontalmente em cada linha
+    for (int i = 0; i < LINHAS; i++)
+    {
+        int x = MARGIN_HORIZONTAL - 10;
+        int y = MARGIN_VERTICAL + (i * ALTURA_CELULA) + 15;
+        Ponto p = {x, y};
+
+        escreve_numeros(t, clues_linhas[i], qtd_clues_linhas[i], p, true);
+    }
+
+    // escrita dos numeros verticalmente em cada coluna
+    for (int j = 0; j < COLUNAS; j++)
+    {
+        int x = MARGIN_HORIZONTAL + (j * LARGURA_CELULA) + 15;
+        int y = MARGIN_VERTICAL - 10;
+        Ponto p = {x, y};
+
+        escreve_numeros(t, clues_colunas[j], qtd_clues_colunas[j], p, false);
+    }
+}
+
+// escreve os numeros (vetor), a partir de uma coordenada, horizontalmente ou verticalmente
+void escreve_numeros(Tela *t, int *numeros, int qtd, Ponto inicio, bool horizontal)
+{
+    int x = inicio.x, y = inicio.y, offset = 20;
+    for (int i = 0; i < qtd; i++)
+    {
+        char buffer[10];
+        sprintf(buffer, "%d", numeros[i]);
+
+        if (horizontal)
+        {
+            if (i > 0)
+                strcat(buffer, ","); // se horizontal separa os numeros com , (menos no numero mais a direita)
+            x -= offset;
+        }
+        else
+            y -= offset;
+
+        Ponto p = {x, y};
+        // escreve o numero na posicao/coordenada definada
+        escreve_texto(t, p, buffer);
+    }
+}
+
+// verifica se houve um clique em alguma celula no tabuleiro
+void verifica_clique(Tela *t, Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS], ModoJogo modo_jogo, int *vidas, EstadoJogo *estado_jogo){
+    Ponto mouse = posicao_mouse(t);
+
+    if (botao_clicado(t))
+    { // mouse foi clicado
+        int x_clique_tabuleiro = (mouse.x - MARGIN_HORIZONTAL);
+        int y_clique_tabuleiro = (mouse.y - MARGIN_VERTICAL);
+
+        // verifica se o clique foi dentro do tabuleiro
+        if (x_clique_tabuleiro >= 0 && y_clique_tabuleiro >= 0)
+        {
+            // descobre qual celula do tabuleiro foi clicada
+            int i = (int)(x_clique_tabuleiro / ALTURA_CELULA);
+            int j = (int)(y_clique_tabuleiro / LARGURA_CELULA);
+
+            // verifica se eh uma celula valida
+            if (i >= 0 && i < LINHAS && j >= 0 && j < COLUNAS)
+            {
+              if (tabuleiro[i][j].estado == VAZIO && solucao[i][j]==0)
+              {
+				tabuleiro[i][j].estado = ALERTA;
+                (*vidas)--;
+              }
+
+
+               if (tabuleiro[i][j].estado==VAZIO && solucao[i][j] == 1)
+               {
+                   tabuleiro[i][j].estado = COLORIDO;
+               }
+              
+              
+                if (verifica_vitoria(tabuleiro, solucao))
+                {
+                    printf("Ganhou!\n");
+                }
+                /* dica: aqui eh um bom lugar para verificar se o usuario venceu :) */
+            }
+        }
+        t->_botao = false; // clique ja foi tratado!
+    }
+}
+
+// cicla o estado da celula
+void cicla_estado_celula(Celula *c)
+{
+    // alternativa: c.estado = (c.estado + 1) % 3;
+    // cicla os estados da celula
+    switch (c->estado)
+    {
+    // se celula esta vazia, fica colorida
+    case VAZIO:
+        c->estado = COLORIDO;
+        break;
+    // se celula esta colorida, fica alerta (x)
+    case COLORIDO:
+        c->estado = ALERTA;
+        break;
+    // se celula esta alerta, volta a ficar vazia
+    case ALERTA:
+        c->estado = VAZIO;
+        break;
+    }
+}
+void gera_solucao(bool solucao[][COLUNAS])
+{
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            solucao[i][j] = rand() % 2;
+        }
+    }
+}
+void calcula_clues_linha(bool solucao[][COLUNAS], int linha, int clues[], int *qtd)
+{
+    int contagem = 0;
+    for (int j = 0; j < COLUNAS; j++)
+    {
+        if (solucao[linha][j] == 1)
+        {
+            contagem++;
+        }
+        else if (solucao[linha][j] == 0 && contagem > 0)
+        {
+            clues[*qtd] = contagem;
+            (*qtd)++;
+            contagem = 0;
+        }
+    }
+    if (contagem > 0)
+    {
+        clues[*qtd] = contagem;
+        (*qtd)++;
+    }
+}
+void calcula_clues_coluna(bool solucao[][COLUNAS], int coluna, int clues[], int *qtd)
+{
+    int contagem = 0;
+    for (int i = 0; i < LINHAS; i++)
+    {
+        if (solucao[i][coluna] == 1)
+        {
+            contagem++;
+        }
+        else if (solucao[i][coluna] == 0 && contagem > 0)
+        {
+            clues[*qtd] = contagem;
+            (*qtd)++;
+            contagem = 0;
+        }
+    }
+    if (contagem > 0)
+    {
+        clues[*qtd] = contagem;
+        (*qtd)++;
+    }
+}
+void calcula_todos_clues(bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[])
+{
+    for (int i = 0; i < LINHAS; i++)
+    {
+        qtd_clues_linhas[i] = 0;
+        calcula_clues_linha(solucao, i, clues_linhas[i], &qtd_clues_linhas[i]);
+    }
+    for (int j = 0; j < COLUNAS; j++)
+    {
+        qtd_clues_colunas[j] = 0;
+        calcula_clues_coluna(solucao, j, clues_colunas[j], &qtd_clues_colunas[j]);
+    }
+}
+void gera_nonogram(bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[])
+{
+    bool valido = false;
+    while (!valido)
+    {
+        gera_solucao(solucao);
+        calcula_todos_clues(solucao, clues_linhas, qtd_clues_linhas, clues_colunas, qtd_clues_colunas);
+        valido = true;
+        for (int i = 0; i < LINHAS && valido; i++)
+        {
+            if (qtd_clues_linhas[i] > MAX_CLUES || qtd_clues_linhas[i] == 0)
+                valido = false;
+            for (int k = 0; k < qtd_clues_linhas[i] && valido; k++)
+            {
+                if (clues_linhas[i][k] > MAX_CLUES)
+                    valido = false;
+            }
+        }
+        for (int j = 0; j < COLUNAS && valido; j++)
+        {
+            if (qtd_clues_colunas[j] > MAX_CLUES || qtd_clues_colunas[j] == 0)
+                valido = false;
+            for (int k = 0; k < qtd_clues_colunas[j] && valido; k++)
+            {
+                if (clues_colunas[j][k] > MAX_CLUES)
+                    valido = false;
+            }
+        }
+    }
+}
+
+bool verifica_vitoria(Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS])
+{
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            if (solucao[i][j] && tabuleiro[j][i].estado != COLORIDO)
+            {
+                printf("Falhou em [%d][%d] estado=%d solucao=%d\n", i, j, tabuleiro[i][j].estado, solucao[i][j]);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+void desenha_menu(Tela *t, ModoJogo *modo_jogo, EstadoJogo *estado_jogo, Celula tabuleiro[][COLUNAS], bool solucao[][COLUNAS], int clues_linhas[][MAX_CLUES], int qtd_clues_linhas[], int clues_colunas[][MAX_CLUES], int qtd_clues_colunas[])
+{
+    Ponto titulo = { 370, 300 };
+    escreve_texto(t, titulo, "Nonogram");
+   
+    Botao button_normal = { {{300, 350}, {200, 50}, VAZIO}, NORMAL, "Normal" };
+    desenha_retangulo(button_normal.ret, t, false);
+    Ponto p = {button_normal.ret.pos.x + 10, button_normal.ret.pos.y + 15};
+    escreve_texto(t, p, "Normal");
+    
+    Botao button_classico = { {{300, 430}, {200, 50}, VAZIO}, NORMAL, "Classico" };
+    desenha_retangulo(button_classico.ret, t, false);
+    Ponto a = { button_classico.ret.pos.x + 10, button_classico.ret.pos.y + 15 };
+    escreve_texto(t, a, "Classic");   
+    Ponto mouse = posicao_mouse(t);
+    if (botao_clicado(t))
+    {
+        if (mouse.x >= button_normal.ret.pos.x &&
+            mouse.x <= button_normal.ret.pos.x + button_normal.ret.tam.larg &&
+            mouse.y >= button_normal.ret.pos.y &&
+            mouse.y <= button_normal.ret.pos.y + button_normal.ret.tam.alt)
+        {
+            *modo_jogo = MODO_NORMAL;
+            inicia_tabuleiro(tabuleiro);
+            gera_nonogram(solucao, clues_linhas, qtd_clues_linhas, clues_colunas, qtd_clues_colunas);
+            for (int i = 0; i < LINHAS; i++)
+            {
+                for (int j = 0; j < COLUNAS; j++)
+                    printf("%d ", solucao[i][j]);
+                    printf("\n");
+            }
+
+            *estado_jogo = JOGANDO;
+            t->_botao = false;
+        }
+        if (mouse.x >= button_classico.ret.pos.x &&
+            mouse.x <= button_classico.ret.pos.x + button_classico.ret.tam.larg &&
+            mouse.y >= button_classico.ret.pos.y &&
+            mouse.y <= button_classico.ret.pos.y + button_classico.ret.tam.alt)
+        {
+            *modo_jogo = MODO_CLASSICO;
+            inicia_tabuleiro(tabuleiro);
+            gera_nonogram(solucao, clues_linhas, qtd_clues_linhas, clues_colunas, qtd_clues_colunas);
+            for (int i = 0; i < LINHAS; i++)
+            {
+                for (int j = 0; j < COLUNAS; j++)
+                    printf("%d ", solucao[i][j]);
+                    printf("\n");
+            }
+
+            *estado_jogo = JOGANDO;
+            t->_botao = false;
+        }
+    }
+}
